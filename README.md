@@ -83,3 +83,16 @@ AES_256_GCM       |  90 MB/s | 1.96 GB/s | 2.64 GB/s | 2.83 GB/s
 CHACHA20_POLY1305 |  97 MB/s | 1.23 GB/s | 1.54 GB/s | 1.57 GB/s
 
 *On i7-6500U 2 x 2.5 GHz | Linux 4.10.0-32-generic | Go 1.8.3 | AES-NI & AVX2*
+
+## Note
+
+[DARE in sftpgo](https://github.com/drakkan/sftpgo/blob/main/docs/dare.md)
+
+The only required configuration parameter is a passphrase, each file will be encrypted using an unique, randomly
+generated secret key derived from the given passphrase using the HMAC-based Extract-and-Expand Key Derivation Function (
+HKDF) as defined in [RFC 5869](http://tools.ietf.org/html/rfc5869). It is important to note that the per-object
+encryption key is never stored anywhere: it is derived from your passphrase and a randomly generated initialization
+vector just before encryption/decryption. The initialization vector is stored with the file.
+
+唯一需要的配置参数是密码短语，每个文件将使用一个唯一的、随机生成的密钥加密，这个密钥来自给定的密码短语，使用基于 HMAC 的提取-扩展密钥导出函数(HKDF) ，如 RFC
+5869中定义的。需要注意的是，***每个对象的加密密钥从来不存储在任何地方: 它来自密码短语和加密/解密之前随机生成的初始向量。初始向量文件和这个文件一起存储***。

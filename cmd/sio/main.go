@@ -33,8 +33,12 @@ package main
 
 import (
 	"crypto/rand"
+	"crypto/sha256"
+	"errors"
 	"flag"
 	"fmt"
+	"golang.org/x/crypto/hkdf"
+	"golang.org/x/crypto/scrypt"
 	"io"
 	"os"
 	"os/signal"
@@ -42,7 +46,6 @@ import (
 	"syscall"
 
 	"github.com/bingoohuang/sio"
-	"golang.org/x/crypto/scrypt"
 	"golang.org/x/crypto/ssh/terminal"
 )
 
@@ -62,6 +65,7 @@ var (
 	decryptFlag  bool
 	cipherFlag   string
 	passwordFlag string
+	kdf          string
 )
 
 func boolVar(p *bool, name string, value bool, usage string) {
@@ -79,6 +83,7 @@ func printFlag(f *flag.Flag) {
 func init() {
 	boolVar(&listFlag, "list", false, "List supported algorithms")
 	boolVar(&decryptFlag, "d", false, "Decrypt")
+	stringVar(&kdf, "kdf", "hkdf", "KDF scrypt/hkdf")
 	stringVar(&cipherFlag, "cipher", "", "Specify cipher - default: platform depended")
 	stringVar(&passwordFlag, "p", "", "Specify the password - default: prompt for password")
 
@@ -149,11 +154,12 @@ func printCiphers() {
 	exit(codeOK)
 }
 
+var NoopErr = errors.New("default error")
+
 func cipherSuites() []byte {
 	switch cipherFlag {
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown cipher: %s\n", cipherFlag)
-		exit(codeError)
+		checkErr(NoopErr, "Unknown cipher: %s\n", cipherFlag)
 		return nil // make compiler happy
 	case "":
 		return []byte{} // use platform specific cipher
@@ -167,29 +173,25 @@ func cipherSuites() []byte {
 func parseIOArgs() (*os.File, *os.File) {
 	switch args := flag.Args(); len(args) {
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown arguments: %s\n", args[2:])
-		exit(codeError)
+		checkErr(NoopErr, "Unknown arguments: %s\n", args[2:])
 		return nil, nil // make compiler happy
 	case 0:
 		return os.Stdin, os.Stdout
 	case 1:
 		in, err := os.Open(args[0])
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to open '%s': %v\n", args[0], err)
-			exit(codeError)
+			checkErr(err, "Failed to open '%s': %v\n", args[0], err)
 		}
 		cleanFn = append(cleanFn, func(code int) { in.Close() })
 		return in, os.Stdout
 	case 2:
 		in, err := os.Open(args[0])
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to open '%s': %v\n", args[0], err)
-			exit(codeError)
+			checkErr(err, "Failed to open '%s': %v\n", args[0], err)
 		}
 		out, err := os.Create(args[1])
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to create '%s': %v\n", args[1], err)
-			exit(codeError)
+			checkErr(err, "Failed to create '%s': %v\n", args[1], err)
 		}
 		cleanFn = append(cleanFn, func(code int) {
 			out.Close()
@@ -204,8 +206,7 @@ func parseIOArgs() (*os.File, *os.File) {
 func readPassword(src *os.File) []byte {
 	state, err := terminal.GetState(int(src.Fd()))
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Failed to read password:", err)
-		exit(codeError)
+		checkErr(err, "Failed to read password:", err)
 	}
 	cleanFn = append(cleanFn, func(code int) {
 		stat, _ := terminal.GetState(int(src.Fd()))
@@ -218,61 +219,84 @@ func readPassword(src *os.File) []byte {
 	fmt.Fprint(src, "Enter password:")
 	password, err := terminal.ReadPassword(int(src.Fd()))
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Failed to read password:", err)
-		exit(codeError)
+		checkErr(err, "Failed to read password:", err)
 	}
 	fmt.Fprintln(src, "")
 	if len(password) == 0 {
-		fmt.Fprintln(os.Stderr, "Failed to read password: No password")
-		exit(codeError)
+		checkErr(err, "Failed to read password: No password")
 	}
 	return password
 }
 
 func deriveKey(dst, src *os.File) []byte {
-	var password []byte
-	if passwordFlag != "" {
-		password = []byte(passwordFlag)
-	} else if src == os.Stdin {
-		password = readPassword(os.Stderr)
-	} else {
-		password = readPassword(os.Stdin)
-	}
+	password := getPassword(passwordFlag, src)
+	salt := getSalt(decryptFlag, dst, src)
 
+	switch kdf {
+	case "scrypt":
+		key, err := scrypt.Key(password, salt, 32768, 16, 1, 32)
+		checkErr(err, "Failed to derive key from password and salt")
+		return key
+	case "hkdf":
+		key := make([]byte, 32)
+		r := hkdf.New(sha256.New, password, salt, nil)
+		_, err := io.ReadFull(r, key)
+		checkErr(err, "Failed to read kdf")
+
+		return key
+	default:
+		checkErr(NoopErr, "unknown kdf %q", kdf)
+		return nil
+	}
+}
+
+func getSalt(decryptFlag bool, dst *os.File, src *os.File) []byte {
 	salt := make([]byte, 32)
 	if decryptFlag {
 		if _, err := io.ReadFull(src, salt); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to read salt from '%s'\n", src.Name())
-			exit(codeError)
+			checkErr(err, "Failed to read salt from %q", src.Name())
 		}
-	} else {
-		if _, err := io.ReadFull(rand.Reader, salt); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to generate random salt '%s'\n", src.Name())
-			exit(codeError)
-		}
-		if _, err := dst.Write(salt); err != nil {
-			fmt.Fprintf(os.Stderr, "Failed to write salt to '%s'\n", dst.Name())
-			exit(codeError)
-		}
+		return salt
 	}
-	key, err := scrypt.Key(password, salt, 32768, 16, 1, 32)
+
+	if _, err := io.ReadFull(rand.Reader, salt); err != nil {
+		checkErr(err, "Failed to generate random salt %q", src.Name())
+	}
+	if _, err := dst.Write(salt); err != nil {
+		checkErr(err, "Failed to write salt to %q", dst.Name())
+	}
+
+	return salt
+}
+
+func getPassword(pwdFlag string, src *os.File) []byte {
+	if pwdFlag != "" {
+		return []byte(pwdFlag)
+	} else if src == os.Stdin {
+		return readPassword(os.Stderr)
+	} else {
+		return readPassword(os.Stdin)
+	}
+}
+
+func checkErr(err error, format string, args ...interface{}) {
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "Failed to derive key from password and salt")
+		_, _ = fmt.Fprintf(os.Stderr, format+"\n", args...)
+		if err != NoopErr {
+			_, _ = fmt.Fprintf(os.Stderr, "error %s\n", err.Error())
+		}
 		exit(codeError)
 	}
-	return key
 }
 
 func encrypt(dst, src *os.File, cfg sio.Config) {
 	if _, err := sio.Encrypt(dst, src, cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to encrypt: '%s'\n", src.Name())
-		exit(codeError)
+		checkErr(err, "Failed to encrypt: %q", src.Name())
 	}
 }
 
 func decrypt(dst, src *os.File, cfg sio.Config) {
 	if _, err := sio.Decrypt(dst, src, cfg); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to decrypt: '%s'\n", src.Name())
-		exit(codeError)
+		checkErr(err, "Failed to decrypt:  %q", src.Name())
 	}
 }
