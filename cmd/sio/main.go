@@ -37,13 +37,14 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"golang.org/x/crypto/hkdf"
-	"golang.org/x/crypto/scrypt"
 	"io"
 	"os"
 	"os/signal"
 	"runtime"
 	"syscall"
+
+	"golang.org/x/crypto/hkdf"
+	"golang.org/x/crypto/scrypt"
 
 	"github.com/bingoohuang/sio"
 	"golang.org/x/crypto/ssh/terminal"
