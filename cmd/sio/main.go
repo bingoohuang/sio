@@ -155,12 +155,13 @@ func printCiphers() {
 	exit(codeOK)
 }
 
-var NoopErr = errors.New("default error")
+// ErrPlaceholder is just a placeholder for an error.
+var ErrPlaceholder = errors.New("default error")
 
 func cipherSuites() []byte {
 	switch cipherFlag {
 	default:
-		checkErr(NoopErr, "Unknown cipher: %s\n", cipherFlag)
+		checkErr(ErrPlaceholder, "Unknown cipher: %s\n", cipherFlag)
 		return nil // make compiler happy
 	case "":
 		return []byte{} // use platform specific cipher
@@ -174,7 +175,7 @@ func cipherSuites() []byte {
 func parseIOArgs() (*os.File, *os.File) {
 	switch args := flag.Args(); len(args) {
 	default:
-		checkErr(NoopErr, "Unknown arguments: %s\n", args[2:])
+		checkErr(ErrPlaceholder, "Unknown arguments: %s\n", args[2:])
 		return nil, nil // make compiler happy
 	case 0:
 		return os.Stdin, os.Stdout
@@ -246,7 +247,7 @@ func deriveKey(dst, src *os.File) []byte {
 
 		return key
 	default:
-		checkErr(NoopErr, "unknown kdf %q", kdf)
+		checkErr(ErrPlaceholder, "unknown kdf %q", kdf)
 		return nil
 	}
 }
@@ -283,7 +284,7 @@ func getPassword(pwdFlag string, src *os.File) []byte {
 func checkErr(err error, format string, args ...interface{}) {
 	if err != nil {
 		_, _ = fmt.Fprintf(os.Stderr, format+"\n", args...)
-		if err != NoopErr {
+		if err != ErrPlaceholder {
 			_, _ = fmt.Fprintf(os.Stderr, "error %s\n", err.Error())
 		}
 		exit(codeError)
