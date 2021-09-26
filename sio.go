@@ -43,9 +43,9 @@ const (
 	CHACHA20_POLY1305
 )
 
-// supportsAES indicates whether the CPU provides hardware support for AES-GCM.
+// SupportsAES indicates whether the CPU provides hardware support for AES-GCM.
 // AES-GCM should only be selected as default cipher if there's hardware support.
-var supportsAES = (cpu.X86.HasAES && cpu.X86.HasPCLMULQDQ) || runtime.GOARCH == "s390x"
+var SupportsAES = (cpu.X86.HasAES && cpu.X86.HasPCLMULQDQ) || runtime.GOARCH == "s390x"
 
 const (
 	keySize = 32
@@ -303,7 +303,7 @@ func DecryptWriter(dst io.Writer, config Config) (io.WriteCloser, error) {
 }
 
 func defaultCipherSuites() []byte {
-	if supportsAES {
+	if SupportsAES {
 		return []byte{AES_256_GCM, CHACHA20_POLY1305}
 	}
 	return []byte{CHACHA20_POLY1305, AES_256_GCM}

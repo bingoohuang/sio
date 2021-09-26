@@ -17,7 +17,7 @@
 // Without an input file it reads from STDIN and writes to
 // STDOUT if no output file is specified.
 //
-// Usage: ncrypt [FLAGS] [ARGUMENTS...]
+// Usage: sio [FLAGS] [ARGUMENTS...]
 //
 //    -cipher string   Specify cipher - default: platform depended
 //    -d               Decrypt
@@ -26,10 +26,10 @@
 //
 // Examples:
 //
-// Encrypt file 'myfile.txt':                  ncrypt ~/myfile.txt ~/myfile.txt.enc
-// Decrypt 'myfile.txt.enc' and print content: ncrypt -d ~/myfile.txt
-// Encrypt file 'myfile.txt' using unix pipes: cat ~/myfile.txt | ncrypt > ~/myfile.txt.enc
-package main // import "github.com/minio/sio/cmd/ncrypt"
+// Encrypt file 'myfile.txt':                  sio ~/myfile.txt ~/myfile.txt.enc
+// Decrypt 'myfile.txt.enc' and print content: sio -d ~/myfile.txt
+// Encrypt file 'myfile.txt' using unix pipes: cat ~/myfile.txt | sio > ~/myfile.txt.enc
+package main
 
 import (
 	"crypto/rand"
@@ -39,10 +39,9 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
-	"sort"
 	"syscall"
 
-	"github.com/minio/sio"
+	"github.com/bingoohuang/sio"
 	"golang.org/x/crypto/scrypt"
 	"golang.org/x/crypto/ssh/terminal"
 )
@@ -65,19 +64,32 @@ var (
 	passwordFlag string
 )
 
-func init() {
-	flag.BoolVar(&listFlag, "list", false, fmt.Sprintf("%-8s List supported algorithms", ""))
-	flag.BoolVar(&decryptFlag, "d", false, fmt.Sprintf("%-8s Decrypt", ""))
+func boolVar(p *bool, name string, value bool, usage string) {
+	flag.BoolVar(p, name, value, fmt.Sprintf("%-8s %s", "", usage))
+}
 
-	flag.StringVar(&cipherFlag, "cipher", "", fmt.Sprintf("%-8s Specify cipher - default: platform depended", "string"))
-	flag.StringVar(&passwordFlag, "p", "", fmt.Sprintf("%-8s Specify the password - default: prompt for password", "string"))
+func stringVar(p *string, name string, value string, usage string) {
+	flag.StringVar(p, name, value, fmt.Sprintf("%-8s %s", "string", usage))
+}
+
+func printFlag(f *flag.Flag) {
+	fmt.Fprintf(os.Stderr, "  -%-6s %s\n", f.Name, f.Usage)
+}
+
+func init() {
+	boolVar(&listFlag, "list", false, "List supported algorithms")
+	boolVar(&decryptFlag, "d", false, "Decrypt")
+	stringVar(&cipherFlag, "cipher", "", "Specify cipher - default: platform depended")
+	stringVar(&passwordFlag, "p", "", "Specify the password - default: prompt for password")
 
 	flag.Usage = func() {
-		printFlag := func(f *flag.Flag) {
-			fmt.Fprintf(os.Stderr, "  -%-6s %s\n", f.Name, f.Usage)
-		}
 		fmt.Fprintf(os.Stderr, "Usage: %s [FLAGS] [ARGUMENTS...]\n\n", os.Args[0])
 		flag.VisitAll(printFlag)
+
+		if sio.SupportsAES {
+			fmt.Fprintf(os.Stderr, "\n\nDetected: CPU provides hardware support for AES-GCM.\n")
+		}
+
 		os.Exit(codeOK)
 	}
 
@@ -96,14 +108,14 @@ func init() {
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)
 	go func() {
 		<-sigChan
-		cleanChan <- codeCancel // try to exit gracefully
+		cleanCh <- codeCancel // try to exit gracefully
 		runtime.Goexit()
 	}()
 }
 
-var supportedCiphers = map[string]string{
-	"AES256":   "AES-256 GCM",
-	"C20P1305": "ChaCha20 Poly1305",
+var supportedCiphers = [][]string{
+	{"AES256", "AES-256 GCM"},
+	{"C20P1305", "ChaCha20 Poly1305"},
 }
 
 func main() {
@@ -130,15 +142,9 @@ func exit(code int) {
 }
 
 func printCiphers() {
-	ciphers := make([]string, 0, len(supportedCiphers))
-	for c := range supportedCiphers {
-		ciphers = append(ciphers, c)
-	}
-	sort.Strings(ciphers)
-
 	fmt.Fprintln(os.Stdout, "Supported ciphers:")
-	for _, c := range ciphers {
-		fmt.Fprintf(os.Stdout, "\t%-8s : %s\n", c, supportedCiphers[c])
+	for _, c := range supportedCiphers {
+		fmt.Fprintf(os.Stdout, "\t%-8s : %s\n", c[0], c[1])
 	}
 	exit(codeOK)
 }
@@ -224,10 +230,7 @@ func readPassword(src *os.File) []byte {
 }
 
 func deriveKey(dst, src *os.File) []byte {
-	var (
-		password []byte
-		salt     = make([]byte, 32)
-	)
+	var password []byte
 	if passwordFlag != "" {
 		password = []byte(passwordFlag)
 	} else if src == os.Stdin {
@@ -235,6 +238,8 @@ func deriveKey(dst, src *os.File) []byte {
 	} else {
 		password = readPassword(os.Stdin)
 	}
+
+	salt := make([]byte, 32)
 	if decryptFlag {
 		if _, err := io.ReadFull(src, salt); err != nil {
 			fmt.Fprintf(os.Stderr, "Failed to read salt from '%s'\n", src.Name())

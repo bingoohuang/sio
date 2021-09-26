@@ -53,8 +53,7 @@ func (w *decWriterV10) Write(p []byte) (n int, err error) {
 		n = copy(w.buffer[w.offset:], p[:remaining])
 		p = p[remaining:]
 		w.offset += n
-	}
-	if w.offset >= headerSize { // buffer the ciphertext and tag -> here we know when to decrypt
+	} else if w.offset >= headerSize { // buffer the ciphertext and tag -> here we know when to decrypt
 		remaining := w.buffer.Length() - w.offset
 		if len(p) < remaining {
 			nn := copy(w.buffer[w.offset:], p)
