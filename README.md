@@ -1,5 +1,5 @@
 [![Godoc Reference](https://godoc.org/github.com/bingoohuang/sio?status.svg)](https://godoc.org/github.com/bingoohuang/sio)
-[![Travis CI](https://travis-ci.org/bingoohuang/sio.svg?branch=master)](https://travis-ci.org/bingoohuang/sio)
+[![Travis CI](https://travis-ci.com/bingoohuang/sio.svg?branch=master)](https://travis-ci.com/bingoohuang/sio)
 [![Go Report Card](https://goreportcard.com/badge/bingoohuang/sio)](https://goreportcard.com/report/bingoohuang/sio)
 
 # Secure IO
